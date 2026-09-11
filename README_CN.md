@@ -14,7 +14,9 @@
 
 ## 方法概览
 
-SPARK-UNet 在 nnU-Net 式 **稠密 U-Net** 主干上，用 **先验引导的 where-to-read** 与 **预算约束的 anchor write-back（BA）** 注入长程上下文，避免对全网格做全局自注意力；未选中位置保持 CNN 基底，仍支持稠密输出与滑窗推理。
+稠密全局自注意力能为 3D CT/MRI 提供显式长程上下文，但代价随 token 数二次增长；窗口/轴向等方案又把交互位置写死，token 剪枝则往往先稀疏表征再补回稠密通路。**SPARK-UNet** 走互补路线：**保留完整的多尺度卷积特征网格**（局部归纳偏置与 skip 不变），**稀疏的是计算而非表征**——在任务相关位置上按固定交互预算注入上下文。
+
+交互被拆成三个可独立控制的决策：**where**（任务条件先验 + PGTS）、**how many**（逐 stage 硬 Top-K 预算）、**what**（MSBA 多源聚合 + 门控残差写回）；未选中位置保持 CNN 基底，无需 token 补全或稀疏→稠密重投影。TAE / WinMHSA3D 补充轴向局部与窗内建模。模块作为 nnU-Net 中可开关单元插入，便于在匹配协议下隔离交互机制本身的贡献，并继续支持稠密输出与滑窗推理。
 
 ---
 
@@ -38,8 +40,8 @@ SPARK-UNet 在 nnU-Net 式 **稠密 U-Net** 主干上，用 **先验引导的 wh
 
 | 类型 | 链接 |
 |:-----|:-----|
-| nnU-Net 格式（百度网盘） | [ACDC](https://pan.baidu.com/s/1UpbyOIFCrYgThEsCaDyAWg?pwd=fr7t) · 提取码 `fr7t` |
-| nnU-Net 格式（阿里云盘） | [ACDC](https://www.alipan.com/s/EJPiXceGWZV) |
+| nnU-Net 格式（百度网盘） | [Dataset100_ACDC.zip](https://pan.baidu.com/s/1AUUW16e-1RaTCaLbSaAgRA?pwd=3ufj)（提取码：`3ufj`） |
+| nnU-Net 格式（Kaggle） | [acdc-datasat](https://www.kaggle.com/datasets/shuaishuaichai/acdc-datasat) |
 | 官方源 | [Human Heart Project / ACDC](https://humanheart-project.creatis.insa-lyon.fr/database/#collection/637218c173e9f0047faa00fb) |
 | TransUNet 划分预处理参考 | [Google Drive](https://drive.google.com/drive/folders/1KQcrci7aKsYZi1hQoZ3T3QUtcy7b--n4) |
 
@@ -47,17 +49,18 @@ SPARK-UNet 在 nnU-Net 式 **稠密 U-Net** 主干上，用 **先验引导的 wh
 
 | 类型 | 链接 |
 |:-----|:-----|
-| nnU-Net 格式（百度网盘） | [Synapse](https://pan.baidu.com/s/1IvX_5Q1h6QeSDa__gjEX_A?pwd=drsm) · 提取码 `drsm` |
+| nnU-Net 格式（百度网盘） | [Dataset180_Synapse.zip](https://pan.baidu.com/s/17yYXaYWeLJQxMA6Txyl15w?pwd=idkd)（提取码：`idkd`） |
+| nnU-Net 格式（Kaggle） | [synapse-dataset](https://www.kaggle.com/datasets/shuaishuaichai/synapse-dataset) |
 | 官方源（BTCV / Synapse） | [Synapse: syn3193805](https://www.synapse.org/Synapse:syn3193805/wiki/89480) |
 | TransUNet 划分预处理参考 | [Google Drive](https://drive.google.com/drive/folders/1ACJEoTp-uqfFJ73qS3eUObQh52nGuzCd) |
 
 ### BraTS 2021 Adult Glioma
 
-论文与实验口径为 **BraTS 2021** 公开带标注训练队列（1251 例）。BraTS 2022/2023 Adult Glioma 为同一队列的再分发，**不等于** BraTS 2025 Lighthouse。
+论文与实验口径为 **BraTS 2021** 公开带标注训练队列（1251 例）。BraTS 2022/2023 Adult Glioma 为同一队列的再分发，**不等于** BraTS 2025 Lighthouse。百度包文件名为 `Dataset1251_BraTS2023GLI.zip`，与上述同队列一致。
 
 | 类型 | 链接 |
 |:-----|:-----|
-| nnU-Net 格式（阿里云盘） | [Dataset1251_BraTS2021GLI](https://www.alipan.com/s/M7cS2KvaAuK) |
+| nnU-Net 格式（百度网盘） | [Dataset1251_BraTS2023GLI.zip](https://pan.baidu.com/s/1Ji6Uh6g_Fs6lDOMHkFaktw?pwd=vz41)（提取码：`vz41`） |
+| nnU-Net 格式（Kaggle） | [brats2021-dataset](https://www.kaggle.com/datasets/shuaishuaichai/brats2021-dataset) |
 | 官方源（BraTS 2021） | [Synapse: syn25829067](https://www.synapse.org/Synapse:syn25829067) |
 | 同队列再分发参考（2023 challenge 页） | [Synapse: syn51156910](https://www.synapse.org/Synapse:syn51156910/wiki/622351) |
-| Kaggle 镜像（同队列） | [part-1](https://www.kaggle.com/datasets/aiocta/brats2023-part-1) · [part-2](https://www.kaggle.com/datasets/aiocta/brats2023-part-2zip) |
