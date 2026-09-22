@@ -20,6 +20,100 @@ Interaction factors into three controllable decisions: **where** (task-condition
 
 ---
 
+## Pseudocode (product stack)
+
+Default topology (**P5 → S6**, stages **E₀…E₅**): **E₀** TAE only; **E₁–E₄** Spark Block; **E₅** PriorHead on the CNN bottleneck; U-Net decoder with attention gates (AG); no bottleneck anchor. Symbols: TAE (tri-axial enhancement), PGTS (prior-gated token selection), MSBA (multi-source sparse block attention), WinMHSA3D (windowed MHSA).
+
+### Algorithm 1 — Host forward (Spark–U-Net / Spark–ResEnc-UNet)
+
+```text
+Input:  volume X; encoder stages E0..E5 (P5→S6); class count C
+Output: segmentation logits Y (deep supervision optional); training prior P_bot
+
+hist ← ∅
+for s = 0 .. 5 do                                # encoder stages
+    F_s ← EncStage_s( F_{s-1} )                  # F_{-1} := X; CNN / ResEnc trunk
+    if s ∈ {0} then                              # local-only: TAE
+        H_s, Δ_s ← TAE(F_s)
+        F_s ← H_s
+        hist ← H_s
+    else if s ∈ {1,2,3,4} then                   # guide: full Spark Block
+        F_s, hist, P_eff ← SparkBlock_s(F_s, hist)
+    # s = 5: CNN only; no Spark Block
+end for
+
+if training then
+    P_bot ← PriorHead(F_5)                       # bottleneck prior (L_prior)
+end if
+Y ← DecoderAG(F_0..F_5)                          # AG before each skip concat
+return Y [, P_bot]
+```
+
+### Algorithm 2 — Spark Block (Stages E₁–E₄)
+
+```text
+Input:  feature F; cascade hist H_prev (or ∅); budget K_s
+Output: updated feature Out; cascade hist ≡ Out; prior map P_eff
+
+# --- TAE ---
+H, Δ ← TAE(F)                                    # H = F + mean(DW_d, DW_h, DW_w)
+e ← Energy(Δ)                                    # per-sample residual energy
+
+# --- task-conditioned prior ---
+P_loc ← Softmax(1×1Conv(H))                      # C-class voxel prior
+P* ← amplify_fg(P_loc; e)                        # fg channels × (1+γ·e)
+P_eff ← clip(P* + λ·e·(1−fg(P*)))                # λ = 0.25 fallback
+
+# --- PGTS: where + how many ---
+I_raw ← σ(CNN_score(H))
+I ← max(P_eff[1:]) · (ε + (1−ε)·I_raw)           # ε = 0.1; bg channel unused
+Base ← H + 1×1(H ⊙ I)                            # zero-init refine
+Idx ← TopK(I, K_s)                               # hard Top-K coords (non-diff.)
+
+# --- MSBA: what + sparse write ---
+Q ← Gather(Base, Idx)                            # K anchors as queries
+HistTok ← Gather(Align(Proj(H_prev), grid), Idx) # self-hist if H_prev = ∅
+G ← Linear(GAP(H))                               # global reference token
+V_src ← {HistTok, broadcast(G), Q}               # multi-source KV
+AttnTok ← Softmax_source(Q, V_src)               # normalize over sources, not N²
+AttnTok ← Q + σ_tok([Q; AttnTok]) · (AttnTok−Q)  # per-anchor gated write
+Cand ← Scatter(Base, Idx, AttnTok)               # unselected voxels unchanged
+Out ← Base + σ_BA(H) · (Cand − Base)             # BaOnBase residual
+
+# --- WinMHSA3D ∥ MSBA ---
+Δ0 ← WinMHSA(H; shift=0) − H
+Δs ← WinMHSA(H; shift=⌊W/2⌋) − H                 # dual-pass; W = window size
+Out ← Out + σ_Win(H) · (Δ0 + Δs)
+
+return Out, Out, P_eff
+```
+
+### Algorithm 3 — Token budget K
+
+```text
+# deep_stage = E4 (= max guide); deep_k_max = 16; k_floor = 32; k_cap = 512
+# → (E1, E2, E3, E4) ≈ (128, 64, 32, 32)
+
+K(s) ← clip( deep_k_max · 2^{E4−s} , [k_floor, k_cap] )
+```
+
+### Algorithm 4 — Decoder with attention gates
+
+```text
+Z ← F_5
+for level ℓ = 4 .. 0 do
+    Z ← Upsample(Z)
+    Skip ← AG(g=Z, x=F_ℓ)                        # Attention U-Net gate
+    Z ← ConvBlock( Concat(Z, Skip) )
+    Y_ℓ ← SegHead(Z)                             # deep-supervision head if enabled
+end for
+return {Y_ℓ} or Y_0
+```
+
+**Complexity.** Dense CNN / TAE / PGTS scoring / WinMHSA act on the full feature grid. MSBA interaction is **O(K · S_src)** with S_src = #sources (hist + global ref + self), **not** O(N²). Unselected sites keep the convolutional base; no sparse-to-dense completion.
+
+---
+
 ## Citation
 
 If this work is relevant to your research, please cite the paper (BibTeX / DOI will be added here upon acceptance).
